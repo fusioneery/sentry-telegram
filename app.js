@@ -3,73 +3,20 @@ const express = require("express");
 const app = express();
 const http = require("http");
 const { Telegraf } = require("telegraf");
+
+const {
+  TAGS_WHITELIST,
+  escapeHTML,
+  chunkSubstr,
+  tidyjson,
+  MONITORING_ALERT_RULE_NAME,
+} = require("./utils.js");
 const PROJECTS_MAP = require("./projects.js");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-const MONITORING_ALERT_RULE_NAME = "monitor-alert";
-
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
-
-const indentSpaces = 2;
-const spacesPrefix = (numberOfSpaces) => " ".repeat(numberOfSpaces);
-const tidyjson = (json, spaces = 0) => {
-  let result = "";
-
-  if (Array.isArray(json)) {
-    if (!json.length) return "[]\n";
-
-    result += "[\n";
-    json.forEach((arrayItem) => {
-      result +=
-        spacesPrefix(spaces + indentSpaces) +
-        tidyjson(arrayItem, spaces + indentSpaces);
-    });
-    result += spacesPrefix(spaces) + "]\n";
-  } else if (typeof json === "object") {
-    if (json === null) return "null\n";
-
-    const keys = Object.keys(json);
-
-    if (!keys.length) return "{}\n";
-
-    result += "{\n";
-    keys.forEach((objectKey) => {
-      result +=
-        spacesPrefix(spaces + indentSpaces) +
-        `"${objectKey}": ` +
-        tidyjson(json[objectKey], spaces + indentSpaces);
-    });
-    result += spacesPrefix(spaces) + "}\n";
-  } else if (typeof json === "string") {
-    result += `"${json}"` + "\n";
-  } else {
-    result += json + "\n";
-  }
-
-  return result;
-};
-
-function chunkSubstr(str, size) {
-  const numChunks = Math.ceil(str.length / size);
-  const chunks = new Array(numChunks);
-  for (let i = 0, o = 0; i < numChunks; ++i, o += size) {
-    chunks[i] = str.substr(o, size);
-  }
-  return chunks;
-}
-
-function escapeHTML(unsafe) {
-  return unsafe
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-const TAGS_WHITELIST = ["sentry:user"];
 
 const generateIssueMsg = (msg, developers = []) => {
   let type;
@@ -109,15 +56,6 @@ const generateIssueMsg = (msg, developers = []) => {
         escapeHTML(tidyjson(msg.event.contexts.state.state)) +
         "\n"
       : "";
-
-  // const extra = msg.event.extra
-  //   ? "<b>extra: </b>" + escapeHTML(JSON.stringify(msg.event.extra)) + "\n"
-  //   : "";
-  // const exception = msg.event.exception
-  //   ? "<b>exception: </b>" +
-  //     escapeHTML(msg.event.exception.reduce((acc, cur) => acc, "")) +
-  //     "\n"
-  //   : "";
 
   const device =
     msg.event.contexts &&
@@ -160,19 +98,12 @@ const generateMetricMsg = (msg, developers) => {
 };
 
 const sendMessage = (chatId, rawText) => {
-  const isLongMsg = rawText.length > 4096;
   let message = rawText;
-  if (isLongMsg) {
-    chunkSubstr(message, 4096).forEach((chunk) =>
-      bot.telegram.sendMessage(chatId, chunk, {
-        parse_mode: "HTML",
-      })
-    );
-  } else {
-    bot.telegram.sendMessage(chatId, message, {
+  chunkSubstr(message, 4096).forEach((chunk) =>
+    bot.telegram.sendMessage(chatId, chunk, {
       parse_mode: "HTML",
-    });
-  }
+    })
+  );
 };
 
 app.post("/sentry-telegram/issue", function (req, res, next) {
@@ -206,7 +137,7 @@ app.post("/sentry-telegram/metric", function (req, res, next) {
 });
 
 app.use(function (req, res, next) {
-  next(createError(404));
+  next(res.sendStatus(404));
 });
 
 app.use(function (err, req, res, next) {
